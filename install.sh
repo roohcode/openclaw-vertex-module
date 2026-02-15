@@ -24,7 +24,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Attempt to find gcloud if not in PATH
 if ! command -v gcloud &>/dev/null; then
-    # Common install locations
     POSSIBLE_PATHS=(
         "$HOME/google-cloud-sdk/bin/gcloud"
         "$HOME/.gemini/antigravity/scratch/google-cloud-sdk/bin/gcloud"
@@ -155,9 +154,70 @@ else
     exit 1
 fi
 
+# ── Select Model ────────────────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}[5/7] Select Default Model${NC}"
+echo ""
+
+MODELS_JSON="$SCRIPT_DIR/config/models.json"
+DETECTED_MODELS=""
+
+if [ -f "$MODELS_JSON" ]; then
+    # Load models from JSON
+    # Parse just the ID and Name for the menu
+    MODEL_DATA=$(python3 -c "
+import json
+with open('$MODELS_JSON') as f:
+    models = json.load(f)
+    for m in models:
+        print(f\"{m['id']}|{m['name']}\")
+" 2>/dev/null)
+else
+    # Fallback if file missing
+    MODEL_DATA="gemini-3.0-preview-pro|Gemini 3.0 Preview Pro
+gemini-2.0-flash-exp|Gemini 2.0 Flash (Exp)
+gemini-1.5-pro-001|Gemini 1.5 Pro
+gemini-1.5-flash-001|Gemini 1.5 Flash"
+fi
+
+echo "   #  Model ID                       Name"
+echo "  ─── ─────────────────────────────── ────────────────────────"
+
+i=1
+declare -a M_ID_LIST=()
+declare -a M_NAME_LIST=()
+
+while IFS='|' read -r m_id m_name; do
+    M_ID_LIST+=("$m_id")
+    M_NAME_LIST+=("$m_name")
+    printf "   %d) %-35s %s\n" "$i" "$m_id" "$m_name"
+    i=$((i + 1))
+done <<< "$MODEL_DATA"
+
+echo "   $i) Enter Custom Model ID..."
+CUSTOM_OPTION=$i
+
+echo ""
+read -p "  Choose (1-$CUSTOM_OPTION) [1]: " m_choice
+m_choice="${m_choice:-1}"
+
+SELECTED_MODEL=""
+
+if [ "$m_choice" -eq "$CUSTOM_OPTION" ]; then
+    read -p "  Enter Model ID (e.g. gemini-1.5-pro): " SELECTED_MODEL
+elif [ "$m_choice" -ge 1 ] && [ "$m_choice" -lt "$CUSTOM_OPTION" ]; then
+    idx=$((m_choice - 1))
+    SELECTED_MODEL="${M_ID_LIST[$idx]}"
+else
+    SELECTED_MODEL="${M_ID_LIST[0]}"
+fi
+
+echo -e "  ${GREEN}✓${NC} Selected: ${CYAN}$SELECTED_MODEL${NC}"
+
+
 # ── Backup ──────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[5/7] Backing up config...${NC}"
+echo -e "${BOLD}[6/7] Backing up config...${NC}"
 
 BACKUP_FILE="$OPENCLAW_CONFIG.backup.$(date +%Y%m%d_%H%M%S)"
 cp "$OPENCLAW_CONFIG" "$BACKUP_FILE"
@@ -165,11 +225,12 @@ echo -e "  ${GREEN}✓${NC} Backup saved to: $BACKUP_FILE"
 
 # ── Patch Config ────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[6/7] Patching OpenClaw config...${NC}"
+echo -e "${BOLD}[7/7] Patching OpenClaw config...${NC}"
 
 export _VERTEX_PROJECT_ID="$PROJECT_ID"
 export _VERTEX_TEMPLATE_PATH="$SCRIPT_DIR/config/vertex-provider.json"
 export _VERTEX_MODELS_PATH="$SCRIPT_DIR/config/models.json"
+export _VERTEX_SELECTED_MODEL="$SELECTED_MODEL"
 
 python3 << 'PYTHON_SCRIPT'
 import json
@@ -178,6 +239,8 @@ import os
 config_path = os.environ["_VERTEX_CONFIG_PATH"]
 project_id = os.environ["_VERTEX_PROJECT_ID"]
 template_path = os.environ["_VERTEX_TEMPLATE_PATH"]
+selected_model_id = os.environ["_VERTEX_SELECTED_MODEL"]
+models_path = os.environ["_VERTEX_MODELS_PATH"]
 
 with open(config_path, 'r') as f:
     config = json.load(f)
@@ -186,12 +249,35 @@ with open(config_path, 'r') as f:
 if 'models' not in config: config['models'] = {}
 if 'providers' not in config['models']: config['models']['providers'] = {}
 
-# Load template
+# Load provider template
 with open(template_path, 'r') as f:
     template = json.load(f)
 
 provider_config = template['google-vertex']
 provider_config['projectId'] = project_id
+
+# Load models list to inject (ensure all models are available in the provider config, not just selected)
+# The template already has them, but let's make sure the selected one is in the list if custom
+with open(models_path, 'r') as f:
+    all_models = json.load(f)
+
+# If selected model is custom (not in file), we need to add it or trust the user
+# Just checking if the ID exists in our list
+known_ids = [m['id'] for m in all_models]
+if selected_model_id not in known_ids:
+    # Add a generic entry for the custom model
+    all_models.insert(0, {
+        "id": selected_model_id,
+        "name": selected_model_id,
+        "description": "Custom user-selected model",
+        "reasoning": True,
+        "input": ["text", "image"],
+        "contextWindow": 1048576,
+        "maxTokens": 8192
+    })
+
+# Update provider models list with our full list (including any custom one)
+provider_config['models'] = all_models
 
 # Inject
 config['models']['providers']['google-vertex'] = provider_config
@@ -201,8 +287,8 @@ if 'agents' not in config: config['agents'] = {}
 if 'defaults' not in config['agents']: config['agents']['defaults'] = {}
 if 'model' not in config['agents']['defaults']: config['agents']['defaults']['model'] = {}
 
-# Set to Gemini 1.5 Pro
-config['agents']['defaults']['model']['primary'] = "google-vertex/gemini-1.5-pro-001"
+# Set primary model
+config['agents']['defaults']['model']['primary'] = f"google-vertex/{selected_model_id}"
 
 with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)
@@ -211,14 +297,14 @@ with open(config_path, 'w') as f:
 print("  Config patched successfully")
 PYTHON_SCRIPT
 
-unset _VERTEX_PROJECT_ID _VERTEX_TEMPLATE_PATH _VERTEX_MODELS_PATH _VERTEX_CONFIG_PATH
+unset _VERTEX_PROJECT_ID _VERTEX_TEMPLATE_PATH _VERTEX_MODELS_PATH _VERTEX_CONFIG_PATH _VERTEX_SELECTED_MODEL
 
 echo -e "  ${GREEN}✓${NC} Google Vertex AI provider added"
-echo -e "  ${GREEN}✓${NC} Default model set to: ${CYAN}google-vertex/gemini-1.5-pro-001${NC}"
+echo -e "  ${GREEN}✓${NC} Default model set to: ${CYAN}google-vertex/$SELECTED_MODEL${NC}"
 
 # ── Restart Gateway ─────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[7/7] Restarting OpenClaw gateway...${NC}"
+echo -e "${BOLD}Restarting OpenClaw gateway...${NC}"
 
 RESTARTED=false
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -239,6 +325,6 @@ fi
 
 echo -e "${GREEN}"
 echo "  ╔══════════════════════════════════════════════════╗"
-echo "  ║  ✅ Vertex AI module installed successfully!     ║"
+echo "  ║  ✅ Vertex AI module configuration complete!     ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
