@@ -176,9 +176,7 @@ cat > "$PLIST_PATH" <<EOF
     <string>com.rooh.vertex-proxy</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$PROXY_DIR/venv/bin/python3</string>
-        <string>-m</string>
-        <string>litellm</string>
+        <string>$PROXY_DIR/venv/bin/litellm</string>
         <string>--config</string>
         <string>$PROXY_DIR/config.yaml</string>
         <string>--port</string>
