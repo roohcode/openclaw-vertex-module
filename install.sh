@@ -58,24 +58,34 @@ fi
 echo -e "  ${GREEN}✓${NC} OpenClaw config found"
 
 # Find best python version (prefer 3.13/3.12 for stability)
-PYTHON_CMD="python3"
-for v in 3.13 3.12 3.11 3.10; do
-    if command -v "python$v" &>/dev/null; then
-        # Check if it's actually usable
-        if "python$v" -c "import sys; sys.exit(0)" &>/dev/null; then
+PYTHON_CMD=""
+
+# Explicitly check Homebrew paths first (most likely on macOS)
+for v in 3.13 3.12 3.11; do
+    if [ -x "/opt/homebrew/bin/python$v" ]; then
+        PYTHON_CMD="/opt/homebrew/bin/python$v"
+        break
+    fi
+done
+
+# Fallback to PATH search for specific versions
+if [ -z "$PYTHON_CMD" ]; then
+    for v in 3.13 3.12 3.11 3.10; do
+        if command -v "python$v" &>/dev/null; then
             PYTHON_CMD="python$v"
             break
         fi
-    fi
-done
-# Fallback to homebrew specific paths if command -v failed
-if [ "$PYTHON_CMD" = "python3" ]; then
-    for v in 3.13 3.12 3.11 3.10; do
-        if [ -x "/opt/homebrew/bin/python$v" ]; then
-            PYTHON_CMD="/opt/homebrew/bin/python$v"
-            break
-        fi
     done
+fi
+
+# Fallback to generic python3
+if [ -z "$PYTHON_CMD" ]; then
+    if command -v python3 &>/dev/null; then
+        PYTHON_CMD="python3"
+    else
+        echo -e "${RED}✗ Python 3 is required but not found${NC}"
+        exit 1
+    fi
 fi
 
 echo -e "  ${GREEN}✓${NC} Using Python: $PYTHON_CMD ($($PYTHON_CMD --version))"
