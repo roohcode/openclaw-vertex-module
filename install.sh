@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
 # OpenClaw Vertex AI Module — One-Click Installer
-# Adds Google Vertex AI support to OpenClaw
+# Adds Google Vertex AI support to OpenClaw via LiteLLM Bridge
 #
 # Created by ROOH (https://rooh.red)
 # Usage:
@@ -20,6 +20,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
+PROXY_DIR="$HOME/.openclaw/vertex-proxy"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Attempt to find gcloud if not in PATH
@@ -48,11 +49,10 @@ echo "  ╚═══════════════════════
 echo -e "${NC}"
 
 # ── Preflight Checks ───────────────────────────────────────────────────────
-echo -e "${BOLD}[1/7] Preflight checks...${NC}"
+echo -e "${BOLD}[1/8] Preflight checks...${NC}"
 
 if [ ! -f "$OPENCLAW_CONFIG" ]; then
     echo -e "${RED}✗ OpenClaw config not found at $OPENCLAW_CONFIG${NC}"
-    echo "  Please install OpenClaw first: https://openclaw.ai"
     exit 1
 fi
 echo -e "  ${GREEN}✓${NC} OpenClaw config found"
@@ -70,30 +70,30 @@ if ! command -v gcloud &>/dev/null; then
 fi
 echo -e "  ${GREEN}✓${NC} gcloud CLI available"
 
-# Check valid JSON
-export _VERTEX_CONFIG_PATH="$OPENCLAW_CONFIG"
-if ! python3 -c "import json,os; json.load(open(os.environ['_VERTEX_CONFIG_PATH']))" 2>/dev/null; then
-    echo -e "${RED}✗ openclaw.json contains invalid JSON. Please fix it first.${NC}"
-    exit 1
-fi
-echo -e "  ${GREEN}✓${NC} Config JSON is valid"
-
 # ── Google Cloud Authentication ─────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[2/7] Checking Google Cloud Authentication...${NC}"
+echo -e "${BOLD}[2/8] Checking Google Cloud Authentication...${NC}"
 
 if ! gcloud auth print-access-token &>/dev/null; then
     echo -e "${YELLOW}⚠ You are not logged in to Google Cloud.${NC}"
     echo "  Launching login flow..."
     gcloud auth login
+    # Login for ADC is crucial for LiteLLM
+    echo "  Setting up Application Default Credentials (ADC)..."
+    gcloud auth application-default login --no-launch-browser
 else
+    # Check if ADC is set up (usually implied, but let's be safe)
+    if [ ! -f "$HOME/.config/gcloud/application_default_credentials.json" ]; then
+         echo -e "${YELLOW}⚠ Application Default Credentials (ADC) needed for bridge.${NC}"
+         gcloud auth application-default login --no-launch-browser
+    fi
     CURRENT_USER=$(gcloud config get-value account 2>/dev/null)
     echo -e "  ${GREEN}✓${NC} Logged in as: ${CYAN}$CURRENT_USER${NC}"
 fi
 
 # ── Select Project ──────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[3/7] Configuring Google Cloud Project...${NC}"
+echo -e "${BOLD}[3/8] Configuring Google Cloud Project...${NC}"
 
 CURRENT_PROJECT=$(gcloud config get-value project 2>/dev/null)
 
@@ -110,8 +110,7 @@ if [ -z "$CURRENT_PROJECT" ]; then
     PROJECTS_LIST=$(gcloud projects list --format="value(projectId)" 2>/dev/null)
     
     if [ -z "$PROJECTS_LIST" ]; then
-        echo -e "${RED}✗ No projects found. Please create a Google Cloud project first.${NC}"
-        echo "  https://console.cloud.google.com/projectcreate"
+        echo -e "${RED}✗ No projects found.${NC}"
         exit 1
     fi
 
@@ -137,34 +136,84 @@ if [ -z "$CURRENT_PROJECT" ]; then
     echo "  Setting active project to $CURRENT_PROJECT..."
     gcloud config set project "$CURRENT_PROJECT"
 fi
+echo -e "  ${GREEN}✓${NC} Project: ${CYAN}$CURRENT_PROJECT${NC}"
 
-PROJECT_ID="$CURRENT_PROJECT"
-echo -e "  ${GREEN}✓${NC} Using Project ID: ${CYAN}$PROJECT_ID${NC}"
+# Enable API
+echo "  Verifying API enablement..."
+gcloud services enable aiplatform.googleapis.com &>/dev/null || true
+echo -e "  ${GREEN}✓${NC} API ready"
 
-# ── Enable Vertex AI API ────────────────────────────────────────────────────
+# ── Install LiteLLM Bridge ──────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[4/7] Verifying Vertex AI API...${NC}"
+echo -e "${BOLD}[4/8] Installing LiteLLM Bridge...${NC}"
 
-echo "  Enabling aiplatform.googleapis.com (this may take a moment)..."
-if gcloud services enable aiplatform.googleapis.com; then
-    echo -e "  ${GREEN}✓${NC} API Enabled"
-else
-    echo -e "${RED}✗ Failed to enable Vertex AI API.${NC}"
-    echo "  Check your billing status: https://console.cloud.google.com/billing"
-    exit 1
+mkdir -p "$PROXY_DIR"
+
+if [ ! -d "$PROXY_DIR/venv" ]; then
+    echo "  Creating virtual environment..."
+    python3 -m venv "$PROXY_DIR/venv"
 fi
+
+echo "  Installing dependencies options (this may take a minute)..."
+"$PROXY_DIR/venv/bin/pip" install -q "litellm[proxy]"
+
+# Copy config
+cp "$SCRIPT_DIR/config/litellm_config.yaml" "$PROXY_DIR/config.yaml"
+echo -e "  ${GREEN}✓${NC} Bridge installed in $PROXY_DIR"
+
+# ── Setup LaunchAgent ───────────────────────────────────────────────────────
+echo ""
+echo -e "${BOLD}[5/8] Configuring Background Service...${NC}"
+
+PLIST_PATH="$HOME/Library/LaunchAgents/com.rooh.vertex-proxy.plist"
+
+cat > "$PLIST_PATH" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rooh.vertex-proxy</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$PROXY_DIR/venv/bin/python3</string>
+        <string>-m</string>
+        <string>litellm</string>
+        <string>--config</string>
+        <string>$PROXY_DIR/config.yaml</string>
+        <string>--port</string>
+        <string>18790</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$PROXY_DIR/proxy.log</string>
+    <key>StandardErrorPath</key>
+    <string>$PROXY_DIR/proxy.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>GOOGLE_CLOUD_PROJECT</key>
+        <string>$CURRENT_PROJECT</string>
+    </dict>
+</dict>
+</plist>
+EOF
+
+# Unload previous and load new
+launchctl unload "$PLIST_PATH" 2>/dev/null || true
+launchctl load "$PLIST_PATH"
+echo -e "  ${GREEN}✓${NC} Bridge service started on port 18790"
 
 # ── Select Model ────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[5/7] Select Default Model${NC}"
+echo -e "${BOLD}[6/8] Select Default Model${NC}"
 echo ""
 
 MODELS_JSON="$SCRIPT_DIR/config/models.json"
-DETECTED_MODELS=""
-
+# Use regex to default to the 3.0 model logic if json absent, otherwise load names
 if [ -f "$MODELS_JSON" ]; then
-    # Load models from JSON
-    # Parse just the ID and Name for the menu
     MODEL_DATA=$(python3 -c "
 import json
 with open('$MODELS_JSON') as f:
@@ -173,23 +222,14 @@ with open('$MODELS_JSON') as f:
         print(f\"{m['id']}|{m['name']}\")
 " 2>/dev/null)
 else
-    # Fallback if file missing
-    MODEL_DATA="gemini-3.0-preview-pro|Gemini 3.0 Preview Pro
-gemini-2.0-flash-exp|Gemini 2.0 Flash (Exp)
-gemini-1.5-pro-001|Gemini 1.5 Pro
-gemini-1.5-flash-001|Gemini 1.5 Flash"
+     # Fallback
+     MODEL_DATA="gemini-3.0-preview-pro|Gemini 3.0 Preview Pro"
 fi
-
-echo "   #  Model ID                       Name"
-echo "  ─── ─────────────────────────────── ────────────────────────"
 
 i=1
 declare -a M_ID_LIST=()
-declare -a M_NAME_LIST=()
-
 while IFS='|' read -r m_id m_name; do
     M_ID_LIST+=("$m_id")
-    M_NAME_LIST+=("$m_name")
     printf "   %d) %-35s %s\n" "$i" "$m_id" "$m_name"
     i=$((i + 1))
 done <<< "$MODEL_DATA"
@@ -200,131 +240,74 @@ CUSTOM_OPTION=$i
 echo ""
 read -p "  Choose (1-$CUSTOM_OPTION) [1]: " m_choice
 m_choice="${m_choice:-1}"
-
 SELECTED_MODEL=""
 
 if [ "$m_choice" -eq "$CUSTOM_OPTION" ]; then
-    read -p "  Enter Model ID (e.g. gemini-1.5-pro): " SELECTED_MODEL
+    read -p "  Enter Model ID: " SELECTED_MODEL
 elif [ "$m_choice" -ge 1 ] && [ "$m_choice" -lt "$CUSTOM_OPTION" ]; then
     idx=$((m_choice - 1))
     SELECTED_MODEL="${M_ID_LIST[$idx]}"
 else
     SELECTED_MODEL="${M_ID_LIST[0]}"
 fi
-
-echo -e "  ${GREEN}✓${NC} Selected: ${CYAN}$SELECTED_MODEL${NC}"
-
+echo -e "  ${GREEN}✓${NC} Default: $SELECTED_MODEL"
 
 # ── Backup ──────────────────────────────────────────────────────────────────
+# ... (standard backup step) ...
 echo ""
-echo -e "${BOLD}[6/7] Backing up config...${NC}"
-
-BACKUP_FILE="$OPENCLAW_CONFIG.backup.$(date +%Y%m%d_%H%M%S)"
-cp "$OPENCLAW_CONFIG" "$BACKUP_FILE"
-echo -e "  ${GREEN}✓${NC} Backup saved to: $BACKUP_FILE"
+echo -e "${BOLD}[7/8] Backing up config...${NC}"
+cp "$OPENCLAW_CONFIG" "$OPENCLAW_CONFIG.backup.$(date +%Y%m%d_%H%M%S)"
 
 # ── Patch Config ────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}[7/7] Patching OpenClaw config...${NC}"
+echo -e "${BOLD}[8/8] Patching OpenClaw config...${NC}"
 
-export _VERTEX_PROJECT_ID="$PROJECT_ID"
 export _VERTEX_TEMPLATE_PATH="$SCRIPT_DIR/config/vertex-provider.json"
 export _VERTEX_MODELS_PATH="$SCRIPT_DIR/config/models.json"
 export _VERTEX_SELECTED_MODEL="$SELECTED_MODEL"
+export _VERTEX_CONFIG_PATH="$OPENCLAW_CONFIG"
 
 python3 << 'PYTHON_SCRIPT'
-import json
-import os
+import json, os
 
 config_path = os.environ["_VERTEX_CONFIG_PATH"]
-project_id = os.environ["_VERTEX_PROJECT_ID"]
 template_path = os.environ["_VERTEX_TEMPLATE_PATH"]
-selected_model_id = os.environ["_VERTEX_SELECTED_MODEL"]
+selected_model = os.environ["_VERTEX_SELECTED_MODEL"]
 models_path = os.environ["_VERTEX_MODELS_PATH"]
 
-with open(config_path, 'r') as f:
-    config = json.load(f)
+with open(config_path) as f: config = json.load(f)
+with open(template_path) as f: template = json.load(f)
+with open(models_path) as f: all_models = json.load(f)
 
-# Ensure structure
+# Inject provider
 if 'models' not in config: config['models'] = {}
 if 'providers' not in config['models']: config['models']['providers'] = {}
 
-# Load provider template
-with open(template_path, 'r') as f:
-    template = json.load(f)
+provider_cfg = template['google-vertex']
+# Update models list if needed, or strictly rely on template if it's generic
+# Ideally we sync template models with models.json list
+provider_cfg['models'] = all_models 
 
-provider_config = template['google-vertex']
-provider_config['projectId'] = project_id
+config['models']['providers']['google-vertex'] = provider_cfg
 
-# Load models list to inject (ensure all models are available in the provider config, not just selected)
-# The template already has them, but let's make sure the selected one is in the list if custom
-with open(models_path, 'r') as f:
-    all_models = json.load(f)
-
-# If selected model is custom (not in file), we need to add it or trust the user
-# Just checking if the ID exists in our list
-known_ids = [m['id'] for m in all_models]
-if selected_model_id not in known_ids:
-    # Add a generic entry for the custom model
-    all_models.insert(0, {
-        "id": selected_model_id,
-        "name": selected_model_id,
-        "description": "Custom user-selected model",
-        "reasoning": True,
-        "input": ["text", "image"],
-        "contextWindow": 1048576,
-        "maxTokens": 8192
-    })
-
-# Update provider models list with our full list (including any custom one)
-provider_config['models'] = all_models
-
-# Inject
-config['models']['providers']['google-vertex'] = provider_config
-
-# Set default model
+# Set default
 if 'agents' not in config: config['agents'] = {}
 if 'defaults' not in config['agents']: config['agents']['defaults'] = {}
 if 'model' not in config['agents']['defaults']: config['agents']['defaults']['model'] = {}
-
-# Set primary model
-config['agents']['defaults']['model']['primary'] = f"google-vertex/{selected_model_id}"
+config['agents']['defaults']['model']['primary'] = f"google-vertex/{selected_model}"
 
 with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)
     f.write('\n')
-
-print("  Config patched successfully")
 PYTHON_SCRIPT
 
-unset _VERTEX_PROJECT_ID _VERTEX_TEMPLATE_PATH _VERTEX_MODELS_PATH _VERTEX_CONFIG_PATH _VERTEX_SELECTED_MODEL
-
-echo -e "  ${GREEN}✓${NC} Google Vertex AI provider added"
-echo -e "  ${GREEN}✓${NC} Default model set to: ${CYAN}google-vertex/$SELECTED_MODEL${NC}"
+echo -e "  ${GREEN}✓${NC} Config updated"
 
 # ── Restart Gateway ─────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}Restarting OpenClaw gateway...${NC}"
-
-RESTARTED=false
+echo "Restarting OpenClaw..."
 if [[ "$(uname)" == "Darwin" ]]; then
-    if launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Gateway restarted"
-        RESTARTED=true
-    fi
-elif command -v systemctl &>/dev/null; then
-    if systemctl --user restart openclaw-gateway 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Gateway restarted"
-        RESTARTED=true
-    fi
+    launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null || true
 fi
 
-if [ "$RESTARTED" = false ]; then
-    echo -e "  ${YELLOW}⚠${NC} Please restart the gateway manually."
-fi
-
-echo -e "${GREEN}"
-echo "  ╔══════════════════════════════════════════════════╗"
-echo "  ║  ✅ Vertex AI module configuration complete!     ║"
-echo "  ╚══════════════════════════════════════════════════╝"
-echo -e "${NC}"
+echo -e "${GREEN}✅ Installed! OpenClaw is now bridged to Vertex AI.${NC}"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
 # OpenClaw Vertex AI Module — Uninstaller
-# Removes Google Vertex AI support from OpenClaw
+# Removes Google Vertex AI support and LiteLLM Bridge
 #
 # Created by ROOH (https://rooh.red)
 # ============================================================================
@@ -17,6 +17,8 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
+PROXY_DIR="$HOME/.openclaw/vertex-proxy"
+PLIST_PATH="$HOME/Library/LaunchAgents/com.rooh.vertex-proxy.plist"
 
 echo -e "${CYAN}"
 echo "  ╔══════════════════════════════════════════════════╗"
@@ -30,6 +32,23 @@ if [ ! -f "$OPENCLAW_CONFIG" ]; then
     exit 1
 fi
 
+# ── Remove Proxy Service ────────────────────────────────────────────────────
+echo -e "${BOLD}Stopping Vertex AI Bridge...${NC}"
+
+if [ -f "$PLIST_PATH" ]; then
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    rm "$PLIST_PATH"
+    echo -e "  ${GREEN}✓${NC} LaunchAgent removed"
+else
+    echo -e "  ${YELLOW}⚠${NC} LaunchAgent not found (maybe already removed)"
+fi
+
+if [ -d "$PROXY_DIR" ]; then
+    rm -rf "$PROXY_DIR"
+    echo -e "  ${GREEN}✓${NC} Proxy files removed ($PROXY_DIR)"
+fi
+
+# ── Remove OpenClaw Config ──────────────────────────────────────────────────
 # Check if provider exists
 export _VERTEX_CONFIG_PATH="$OPENCLAW_CONFIG"
 if ! python3 -c "
@@ -38,81 +57,52 @@ with open(os.environ['_VERTEX_CONFIG_PATH']) as f:
     cfg = json.load(f)
 sys.exit(0 if 'google-vertex' in cfg.get('models', {}).get('providers', {}) else 1)
 " 2>/dev/null; then
-    echo -e "${YELLOW}⚠ Google Vertex AI provider not found in config. Nothing to remove.${NC}"
-    exit 0
-fi
+    echo -e "${YELLOW}⚠ Provider 'google-vertex' not found in config.${NC}"
+else
+    # Backup
+    cp "$OPENCLAW_CONFIG" "$OPENCLAW_CONFIG.backup.$(date +%Y%m%d_%H%M%S)"
 
-read -p "Remove Google Vertex AI provider from OpenClaw? (y/N): " confirm
-if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-    echo "  Aborted."
-    exit 0
-fi
-
-# Backup
-BACKUP_FILE="$OPENCLAW_CONFIG.backup.$(date +%Y%m%d_%H%M%S)"
-cp "$OPENCLAW_CONFIG" "$BACKUP_FILE"
-echo -e "  ${GREEN}✓${NC} Backup: $BACKUP_FILE"
-
-# Remove provider
-python3 << 'PYTHON_SCRIPT'
-import json
-import os
-
+    # Remove
+    python3 << 'PYTHON_SCRIPT'
+import json, os
 config_path = os.environ["_VERTEX_CONFIG_PATH"]
 
-with open(config_path, 'r') as f:
-    config = json.load(f)
+with open(config_path, 'r') as f: config = json.load(f)
 
-# Remove provider
 if 'google-vertex' in config.get('models', {}).get('providers', {}):
     del config['models']['providers']['google-vertex']
     print("  Removed google-vertex provider")
 
-# Reset default model if it was Vertex
+# Reset default model
 model = config.get('agents', {}).get('defaults', {}).get('model', {}).get('primary', '')
 if model.startswith('google-vertex/'):
     fallback = None
-    # Find first available model
     for pname, pconfig in config.get('models', {}).get('providers', {}).items():
-        models = pconfig.get('models', [])
-        if models:
-            fallback = f"{pname}/{models[0]['id']}"
+        if pconfig.get('models'):
+            fallback = f"{pname}/{pconfig['models'][0]['id']}"
             break
     if fallback:
         config['agents']['defaults']['model']['primary'] = fallback
         print(f"  Default model reset to: {fallback}")
     else:
-        print("  Warning: No fallback model found. Please set a default model manually.")
+        print("  Warning: No fallback model found.")
 
 with open(config_path, 'w') as f:
     json.dump(config, f, indent=2)
     f.write('\n')
 PYTHON_SCRIPT
+fi
 
 unset _VERTEX_CONFIG_PATH
 
-# Restart gateway
+# ── Restart Gateway ─────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}Restarting gateway...${NC}"
 
-RESTARTED=false
 if [[ "$(uname)" == "Darwin" ]]; then
-    if launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Gateway restarted"
-        RESTARTED=true
-    fi
-elif command -v systemctl &>/dev/null; then
-    if systemctl --user restart openclaw-gateway 2>/dev/null; then
-        echo -e "  ${GREEN}✓${NC} Gateway restarted"
-        RESTARTED=true
-    fi
-fi
-
-if [ "$RESTARTED" = false ]; then
-    echo -e "  ${YELLOW}⚠${NC} Please restart the gateway manually."
+    launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null || true
 fi
 
 echo ""
-echo -e "${GREEN}✅ Vertex AI module removed successfully.${NC}"
-echo -e "  Backup: $BACKUP_FILE"
+echo -e "${GREEN}✅ Uninstalled successfully.${NC}"
 echo ""

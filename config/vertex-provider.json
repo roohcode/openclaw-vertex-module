@@ -1,19 +1,41 @@
 {
     "google-vertex": {
-        "api": "google-vertex",
-        "projectId": "__PROJECT_ID__",
-        "region": "us-central1",
+        "api": "openai",
+        "baseUrl": "http://127.0.0.1:18790",
+        "apiKey": "sk-1234",
         "models": [
             {
-                "id": "gemini-1.5-pro-001",
-                "name": "Gemini 1.5 Pro",
-                "description": "Google's most capable AI model for reasoning, coding, and creative collaboration.",
+                "id": "gemini-3.0-preview-pro",
+                "name": "Gemini 3.0 Preview Pro",
+                "description": "User-requested preview model via LiteLLM.",
                 "reasoning": true,
                 "input": [
                     "text",
-                    "image",
-                    "video",
-                    "audio"
+                    "image"
+                ],
+                "contextWindow": 1048576,
+                "maxTokens": 8192
+            },
+            {
+                "id": "gemini-2.0-flash-exp",
+                "name": "Gemini 2.0 Flash (Exp)",
+                "description": "Next-generation Flash model via LiteLLM.",
+                "reasoning": true,
+                "input": [
+                    "text",
+                    "image"
+                ],
+                "contextWindow": 1048576,
+                "maxTokens": 8192
+            },
+            {
+                "id": "gemini-1.5-pro-001",
+                "name": "Gemini 1.5 Pro",
+                "description": "Stable Gemini 1.5 Pro via LiteLLM.",
+                "reasoning": true,
+                "input": [
+                    "text",
+                    "image"
                 ],
                 "contextWindow": 1048576,
                 "maxTokens": 8192
@@ -21,13 +43,11 @@
             {
                 "id": "gemini-1.5-flash-001",
                 "name": "Gemini 1.5 Flash",
-                "description": "Fast and efficient model for high-frequency tasks.",
+                "description": "Stable Gemini 1.5 Flash via LiteLLM.",
                 "reasoning": true,
                 "input": [
                     "text",
-                    "image",
-                    "video",
-                    "audio"
+                    "image"
                 ],
                 "contextWindow": 1048576,
                 "maxTokens": 8192
@@ -35,7 +55,7 @@
             {
                 "id": "gemini-1.0-pro",
                 "name": "Gemini 1.0 Pro",
-                "description": "Standard model for scaling across a wide range of tasks.",
+                "description": "Gemini 1.0 Pro via LiteLLM.",
                 "reasoning": true,
                 "input": [
                     "text",
@@ -47,7 +67,7 @@
             {
                 "id": "chat-bison",
                 "name": "PaLM 2 (Chat Bison)",
-                "description": "Legacy fast model.",
+                "description": "Legacy PaLM 2 via LiteLLM.",
                 "reasoning": false,
                 "input": [
                     "text"

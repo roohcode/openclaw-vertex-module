@@ -1,0 +1,21 @@
+model_list:
+  - model_name: gemini-3.0-preview-pro
+    litellm_params:
+      model: vertex_ai/gemini-3.0-preview-pro
+  - model_name: gemini-2.0-flash-exp
+    litellm_params:
+      model: vertex_ai/gemini-2.0-flash-exp
+  - model_name: gemini-1.5-pro-001
+    litellm_params:
+      model: vertex_ai/gemini-1.5-pro-001
+  - model_name: gemini-1.5-flash-001
+    litellm_params:
+      model: vertex_ai/gemini-1.5-flash-001
+  - model_name: gemini-1.0-pro
+    litellm_params:
+      model: vertex_ai/gemini-1.0-pro
+  - model_name: chat-bison
+    litellm_params:
+      model: vertex_ai/chat-bison
+general_settings:
+  master_key: sk-1234  # Dummy key for OpenClaw
