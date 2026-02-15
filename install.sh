@@ -57,11 +57,28 @@ if [ ! -f "$OPENCLAW_CONFIG" ]; then
 fi
 echo -e "  ${GREEN}✓${NC} OpenClaw config found"
 
-if ! command -v python3 &>/dev/null; then
-    echo -e "${RED}✗ Python 3 is required but not found${NC}"
-    exit 1
+# Find best python version (prefer 3.13/3.12 for stability)
+PYTHON_CMD="python3"
+for v in 3.13 3.12 3.11 3.10; do
+    if command -v "python$v" &>/dev/null; then
+        # Check if it's actually usable
+        if "python$v" -c "import sys; sys.exit(0)" &>/dev/null; then
+            PYTHON_CMD="python$v"
+            break
+        fi
+    fi
+done
+# Fallback to homebrew specific paths if command -v failed
+if [ "$PYTHON_CMD" = "python3" ]; then
+    for v in 3.13 3.12 3.11 3.10; do
+        if [ -x "/opt/homebrew/bin/python$v" ]; then
+            PYTHON_CMD="/opt/homebrew/bin/python$v"
+            break
+        fi
+    done
 fi
-echo -e "  ${GREEN}✓${NC} Python 3 available"
+
+echo -e "  ${GREEN}✓${NC} Using Python: $PYTHON_CMD ($($PYTHON_CMD --version))"
 
 if ! command -v gcloud &>/dev/null; then
     echo -e "${RED}✗ Google Cloud SDK (gcloud) is not found.${NC}"
