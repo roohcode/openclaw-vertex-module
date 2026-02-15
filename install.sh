@@ -94,6 +94,7 @@ if ! command -v gcloud &>/dev/null; then
     # Try finding it in common paths
     POSSIBLE_PATHS=(
         "$HOME/google-cloud-sdk/bin/gcloud"
+        "$HOME/.gemini/antigravity/scratch/google-cloud-sdk/bin/gcloud"
         "/usr/local/bin/gcloud"
         "/opt/homebrew/bin/gcloud"
     )
