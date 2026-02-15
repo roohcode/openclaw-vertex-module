@@ -2,9 +2,6 @@ model_list:
   - model_name: gemini-3.0-preview-pro
     litellm_params:
       model: vertex_ai/gemini-3.0-preview-pro
-
-litellm_settings:
-  drop_params: true
   - model_name: gemini-2.0-flash-exp
     litellm_params:
       model: vertex_ai/gemini-2.0-flash-exp
@@ -20,5 +17,9 @@ litellm_settings:
   - model_name: chat-bison
     litellm_params:
       model: vertex_ai/chat-bison
+
+litellm_settings:
+  drop_params: true
+
 general_settings:
   master_key: sk-1234  # Dummy key for OpenClaw
