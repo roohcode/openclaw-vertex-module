@@ -6,41 +6,46 @@ Created by **ROOH** — [rooh.red](https://rooh.red)
 
 ## ⚡ Quick Start
 
+**One-Line Install:**
+Run this command in your terminal:
+
 ```bash
-git clone https://github.com/roohcode/openclaw-vertex-module.git
-cd openclaw-vertex-module
-chmod +x install.sh
-./install.sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/roohcode/openclaw-vertex-module/main/install.sh)"
 ```
 
-## How It Works (The Bridge) 🌉
+**Or Manual Install:**
+1.  Clone this repository:
+    ```bash
+    git clone https://github.com/roohcode/openclaw-vertex-module.git
+    cd openclaw-vertex-module
+    ```
+2.  Run the installer:
+    ```bash
+    ./install.sh
+    ```
 
-OpenClaw does not support Vertex AI natively. This module solves that by installing a lightweight, local bridge (**LiteLLM**) that translates OpenClaw's requests into Vertex AI calls automatically.
+    Follow the interactive prompts to:
+    - Authenticate with Google Cloud.
+    - Set up the local LiteLLM bridge (Port `18790`).
+    - Configure OpenClaw to use the bridge.
 
-The installer will:
-1.  **Verify Google Cloud**: Checks configuration and enables ADC (Application Default Credentials).
-2.  **Install Bridge**: Sets up a Python virtual environment in `~/.openclaw/vertex-proxy` and installs `litellm`.
-3.  **Start Background Service**: Creates a macOS LaunchAgent (`com.rooh.vertex-proxy`) to keep the bridge running on port `18790`.
-4.  **Configure OpenClaw**: Connects OpenClaw to the local bridge using the `openai` protocol.
+## 📋 Requirements
 
-## Supported Models
+*   **OpenClaw** installed (`~/.openclaw/openclaw.json` must exist).
+*   **Google Cloud SDK** (`gcloud`) installed and authorized.
+*   **Python 3.11+** (3.13 recommended).
+*   A Google Cloud Project with **Vertex AI API** enabled.
 
-The installer features an **Interactive Selection Menu**.
+## 🛠️ Troubleshooting
 
--   **Gemini 3.0 Preview Pro** (`gemini-3.0-preview-pro`) — **Default**
--   **Gemini 2.0 Flash (Exp)** (`gemini-2.0-flash-exp`)
--   **Gemini 1.5 Pro** (`gemini-1.5-pro-001`)
--   **Gemini 1.5 Flash** (`gemini-1.5-flash-001`)
--   **Gemini 1.0 Pro** (`gemini-1.0-pro`)
--   **Custom ID**: Enter any valid Vertex AI model ID.
+**"Connection Refused" / Proxy not starting:**
+- Check logs: `tail -f ~/.openclaw/vertex-proxy/proxy.err`
+- If you see `uvloop` errors (Python 3.14), the installer automatically applies a fix. Try running `./uninstall.sh` and reinstalling.
 
-## Requirements
+**"Invalid Input" errors:**
+- The installer automatically sanitizes the configuration for OpenClaw. Ensure you are using the latest version of this module.
 
--   **OpenClaw** installed.
--   **Google Cloud SDK (`gcloud`)**.
--   **Python 3** (for the bridge).
-
-## Uninstall
+## 🗑️ Uninstall
 
 To remove the bridge, stop the service, and clean up config:
 

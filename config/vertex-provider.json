@@ -1,6 +1,6 @@
 {
     "google-vertex": {
-        "api": "openai",
+        "api": "openai-completions",
         "baseUrl": "http://127.0.0.1:18790",
         "apiKey": "sk-1234",
         "models": [
