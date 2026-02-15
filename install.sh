@@ -188,7 +188,7 @@ echo "  Creating virtual environment ($PYTHON_EXEC)..."
 "$PYTHON_EXEC" -m venv "$PROXY_DIR/venv"
 
 echo "  Installing packages..."
-"$PROXY_DIR/venv/bin/pip" install -q "litellm[proxy]" uvicorn
+"$PROXY_DIR/venv/bin/pip" install -q "litellm[proxy]" uvicorn google-cloud-aiplatform
 
 cp "$SCRIPT_DIR/config/litellm_config.yaml" "$PROXY_DIR/config.yaml"
 echo -e "  ${GREEN}✓${NC} Installed in $PROXY_DIR"
