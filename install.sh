@@ -309,9 +309,29 @@ if 'models' not in config: config['models'] = {}
 if 'providers' not in config['models']: config['models']['providers'] = {}
 
 provider_cfg = template['google-vertex']
-# Update models list if needed, or strictly rely on template if it's generic
-# Ideally we sync template models with models.json list
-provider_cfg['models'] = all_models 
+
+# Fix API type to match OpenClaw schema (based on xai/abliteration examples)
+provider_cfg['api'] = 'openai-completions'
+
+# Sanitize models list
+sanitized_models = []
+valid_inputs = {'text', 'image'}
+for m in all_models:
+    # Create clean copy
+    clean_m = {
+        'id': m['id'],
+        'name': m['name'],
+        'reasoning': m.get('reasoning', False),
+        'contextWindow': m.get('contextWindow', 8192),
+        'maxTokens': m.get('maxTokens', 4096)
+    }
+    # Filter inputs
+    if 'input' in m:
+        clean_m['input'] = [i for i in m['input'] if i in valid_inputs]
+    
+    sanitized_models.append(clean_m)
+
+provider_cfg['models'] = sanitized_models 
 
 config['models']['providers']['google-vertex'] = provider_cfg
 
